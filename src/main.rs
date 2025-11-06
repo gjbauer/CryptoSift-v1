@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::collections::BTreeMap;
+use std::thread;
 
 // def scan_memory_dump(file_path: str, device: str, candidates: list = [], chunk_size: int = 32, stride: int = 8):
 /*fn scan_memory_dump(file_path: String, device: String)
@@ -47,6 +48,22 @@ fn main() -> io::Result<()> {
 		print!("{:02X} ", byte);
 	}
 	println!();
+	
+	println!("bytes per thread {}", bytes.len()/16);
+	
+	let mut children = vec![];
+	
+	for i in 0..=15 {
+		// Spin up another thread
+		children.push(thread::spawn(move || {
+		println!("this is thread number {}", i);
+		}));
+	}
+
+	for child in children {
+		// Wait for the thread to finish. Returns a result.
+		let _ = child.join();
+	}
 	
 	calculate_entropy(&bytes);
 	
