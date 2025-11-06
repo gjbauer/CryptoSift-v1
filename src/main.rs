@@ -1,6 +1,5 @@
 use std::fs;
 use std::io;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -58,20 +57,15 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 
 fn calculate_entropy(bytes: &[u8]) -> f32
 {
-	let mut counts = BTreeMap::new();
-	for i in 0..=255 {
-		counts.insert(i, 0);
-	}
+	let mut counts: [u32; 256] = [0; 256];
 	
 	for byte in bytes {
-		if let Some(count) = counts.get_mut(&byte) {
-			*count += 1;
-		}
+		counts[*byte as usize] += 1;
 	}
 	
 	let mut entropy = 0.0;
-	for count in counts.values() {
-		let prob: f32 = *count as f32 / bytes.len() as f32;
+	for count in counts {
+		let prob: f32 = count as f32 / bytes.len() as f32;
 		if prob > 0.0 {
 			entropy -= prob * prob.log2();
 		}
@@ -105,7 +99,9 @@ fn main() -> io::Result<()> {
 		// Spin up another thread
 		children.push(thread::spawn(move || {
 		println!("this is thread number {}", i);
-		let slice = &bytes_clone[i..(i+1)*(bytes_clone.len()/16)];
+		let mut end = (i+1)*(bytes_clone.len()/16);
+		if i == 15 { end = bytes_clone.len(); }
+		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
 		scan_memory_dump(slice, None, None);
 		}));
 	}
