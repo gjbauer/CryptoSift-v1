@@ -8,27 +8,30 @@ use std::collections::BTreeMap;
 	// TODO: Implement scanning function!!!
 }*/
 
-fn calculate_entropy(bytes: Vec<u8>) //-> u8
+fn calculate_entropy(bytes: Vec<u8>) -> f32
 {
 	let mut counts = BTreeMap::new();
 	for i in 0..=255 {
 		counts.insert(i, 0);
 	}
 	
-	for (value, count) in counts.iter() {
-		println!("Value {} count: {}", value, count);
-	}
-	
-	for byte in bytes {
-		//print!("{:02X} ", byte);
+	for byte in &bytes {
 		if let Some(count) = counts.get_mut(&byte) {
 			*count += 1;
 		}
 	}
 	
-	for (value, count) in counts.iter() {
-		println!("Value {} count: {}", value, count);
+	let mut entropy = 0.0;
+	for count in counts.values() {
+		let prob: f32 = *count as f32 / bytes.len() as f32;
+		if prob > 0.0 {
+			entropy -= prob * prob.log2();
+		}
 	}
+	
+	print!("{:.2} ", entropy);
+	
+	return entropy;
 }
 
 fn main() -> io::Result<()> {
