@@ -3,15 +3,15 @@ use std::io;
 use std::sync::Arc;
 use std::thread;
 
-struct PotentialKey
+struct PotentialKey<'a>
 {
-	pos: u64,
-	bytes: Vec<u8>,
+	pos: usize,
+	bytes: &'a [u8],
 	entropy: f32
 }
 
 // def scan_memory_dump(file_path: str, device: str, candidates: list = [], chunk_size: int = 32, stride: int = 8):
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>) -> Vec<PotentialKey>
+fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>) -> Vec<PotentialKey<'_>>
 {
 	let actual_stride = stride.unwrap_or_else(|| 16);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
@@ -28,6 +28,8 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 		if entropy < 4.65 {
 			continue;
 		}
+		
+		keys.push(PotentialKey { pos: i, bytes: &bytes[i..i+actual_chunk_size], entropy: entropy })
 	}
 	println!();
 	/*
@@ -110,10 +112,6 @@ fn main() -> io::Result<()> {
 		// Wait for the thread to finish. Returns a result.
 		let _ = child.join();
 	}
-	
-	//calculate_entropy(&bytes);
-	
-	//calculate_entropy(&bytes);
 
 	Ok(())
 }
