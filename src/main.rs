@@ -54,7 +54,6 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	
 	for i in (0..=bytes.len()-actual_chunk_size).step_by(actual_stride)
 	{
-		// TODO: Implement message passing to calculate total work by all threads...nice to have, but not our top priority at the moment...
 		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
 		
@@ -156,6 +155,8 @@ fn calculate_entropy(bytes: &Vec<u8>) -> f32
 }
 
 fn main() -> io::Result<()> {
+	let args: Vec<String> = std::env::args().collect();
+	// TODO: Implement usage message and optional arguments
 	let file_path = "dump.bin";
 
 	let bytes = Arc::new(fs::read(file_path)?);
