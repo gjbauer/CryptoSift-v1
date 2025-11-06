@@ -24,6 +24,7 @@
 use std::fs;
 use std::io;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 
 struct PotentialKey
@@ -33,8 +34,19 @@ struct PotentialKey
 	entropy: f32
 }
 
-// def scan_memory_dump(file_path: str, device: str, candidates: list = [], chunk_size: int = 32, stride: int = 8):
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>) -> Vec<PotentialKey>
+struct Message
+{
+	progress: usize,
+	id: usize
+}
+
+struct Sender
+{
+	tx: mpsc::Sender<Message>,
+	id: usize
+}
+
+fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 16);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
@@ -42,8 +54,8 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	
 	for i in (0..=bytes.len()-actual_chunk_size).step_by(actual_stride)
 	{
-		//print!("{:3.2} % into dump...\r", (100 * i / (bytes.len()-actual_chunk_size)));
 		// TODO: Implement message passing to calculate total work by all threads...nice to have, but not our top priority at the moment...
+		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
 		
 		// Filter 1: Skip known compressed formats
@@ -62,6 +74,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 		if keys.len() > 64 { keys.pop(); }
 	}
 	
+	drop(tx);
 	keys
 }
 
@@ -139,8 +152,6 @@ fn calculate_entropy(bytes: &Vec<u8>) -> f32
 		}
 	}
 	
-	//println!("{:.2} ", entropy);
-	
 	return entropy;
 }
 
@@ -148,22 +159,32 @@ fn main() -> io::Result<()> {
 	let file_path = "dump.bin";
 
 	let bytes = Arc::new(fs::read(file_path)?);
+	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
 	
 	let mut children = vec![];
 	
 	for i in 0..=15 {
 		let bytes_clone = Arc::clone(&bytes);
+		let tx_clone = tx.clone();
 		// Spin up another thread
 		children.push(thread::spawn(move || {
-		println!("this is thread number {}", i);
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		scan_memory_dump(slice, None, None);
+		scan_memory_dump(slice, None, None, Sender{ tx: tx_clone, id: i });
 		}));
 	}
+	drop(tx);
 	
-	println!("Hello from main!");
+	let mut queue = vec![];
+	for received_message in rx {
+		queue.retain(|item: &Message| item.id != received_message.id);
+		queue.push(received_message);
+		let j: usize = queue.iter().map(|s| s.progress).sum();
+		print!("{:3.2} % into dump...\r", (100 * j / (bytes.len())));
+	}
+	println!("100 % into dump...");
+	println!("Dump processed!!");
 
 	for child in children {
 		// Wait for the thread to finish. Returns a result.
