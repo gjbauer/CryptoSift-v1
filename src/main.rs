@@ -3,15 +3,15 @@ use std::io;
 use std::sync::Arc;
 use std::thread;
 
-struct PotentialKey<'a>
+struct PotentialKey
 {
 	pos: usize,
-	bytes: &'a [u8],
+	bytes: Vec<u8>,
 	entropy: f32
 }
 
 // def scan_memory_dump(file_path: str, device: str, candidates: list = [], chunk_size: int = 32, stride: int = 8):
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>) -> Vec<PotentialKey<'_>>
+fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 16);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
@@ -22,14 +22,15 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	{
 		//print!("{:3.2} % into dump...\r", (100 * i / (bytes.len()-actual_chunk_size)));
 		// TODO: Implement message passing to calculate total work by all threads...nice to have, but not our top priority at the moment...
+		let vec = &bytes[i..i+actual_chunk_size].to_vec();
 		
 		// Filter 2: Minimum entropy threshold
-		let entropy = calculate_entropy(&bytes[i..i+actual_chunk_size]);
+		let entropy = calculate_entropy(&vec);
 		if entropy < 4.65 {
 			continue;
 		}
 		
-		keys.push(PotentialKey { pos: i, bytes: &bytes[i..i+actual_chunk_size], entropy: entropy })
+		keys.push(PotentialKey { pos: i, bytes: vec.clone(), entropy: entropy })
 	}
 	println!();
 	/*
@@ -57,7 +58,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	keys
 }
 
-fn calculate_entropy(bytes: &[u8]) -> f32
+fn calculate_entropy(bytes: &Vec<u8>) -> f32
 {
 	let mut counts: [u32; 256] = [0; 256];
 	
