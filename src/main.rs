@@ -15,14 +15,18 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 {
 	let actual_stride = stride.unwrap_or_else(|| 16);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
-	// TODO: Implement scanning function!!!
 	let mut keys: Vec<PotentialKey> = Vec::new();
 	
 	for i in (0..=bytes.len()-actual_chunk_size).step_by(actual_stride)
 	{
 		//print!("{:3.2} % into dump...\r", (100 * i / (bytes.len()-actual_chunk_size)));
 		// TODO: Implement message passing to calculate total work by all threads...nice to have, but not our top priority at the moment...
-		let vec = &bytes[i..i+actual_chunk_size].to_vec();
+		let vec = bytes[i..i+actual_chunk_size].to_vec();
+		
+		// Filter 1: Skip known compressed formats
+		if is_known_compressed_format(&vec) {
+			continue;
+		}
 		
 		// Filter 2: Minimum entropy threshold
 		let entropy = calculate_entropy(&vec);
@@ -30,32 +34,70 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		keys.push(PotentialKey { pos: i, bytes: vec.clone(), entropy: entropy })
+		keys.push(PotentialKey { pos: i, bytes: vec.clone(), entropy: entropy });
+		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+		if keys.len() > 64 { keys.pop(); }
 	}
-	println!();
-	/*
-	for i in range(0, len(data) - chunk_size, stride):
-		print("{:.2f}".format(100 * (i / (len(data) - chunk_size)))+" % into dump...", end="\r", flush=True)
-		chunk = data[i:i + chunk_size]
-		
-		# Filter 1: Skip known compressed formats
-		if is_known_compressed_format(chunk):
-			continue
-			
-		# Filter 2: Minimum entropy threshold
-		entropy = calculate_entropy(chunk)
-		if entropy < 4.65:
-			continue
-		
-		print("\nPotential key with entropy {:.2f}".format(entropy))
-		candidates.append((i, chunk, entropy))
-		# Sort by entropy + compression ratio (most promising first)
-		candidates.sort(key=lambda x: (x[2]), reverse=True)
-		if len(candidates) > 64:
-			candidates.pop()  # Remove lowest entropy candidate
-	*/
 	
 	keys
+}
+
+fn is_known_compressed_format(data: &Vec<u8>) -> bool
+{
+	// GZIP (.gz, .tar.gz)
+	if b"\x1f\x8b".iter().all(|item| data.contains(item)) {
+		return true;
+	}
+	// BZIP2 (.bz2, .tar.bz2) 
+	if b"BZh".iter().all(|item| data.contains(item)) {
+		return true;
+	}
+	// XZ (.xz, .tar.xz)
+	if b"\xfd7zXZ\x00".iter().all(|item| data.contains(item)) {
+		return true;
+	}
+	// ZIP (.zip, .jar, .docx)
+	if b"PK\x03\x00".iter().all(|item| data.contains(item)) {
+		return true;
+	}
+	// 7-Zip (.7z)
+	if b"7z\xbc\xaf\x27\x1c".iter().all(|item| data.contains(item)) {
+		return true;
+	}
+	// RAR (.rar)
+	if b"Rar!\x1a\x07\x00".iter().all(|item| data.contains(item)) {	// RAR v1.5+
+		return true;
+	}
+	if b"Rar!\x1a\x07\x01".iter().all(|item| data.contains(item)) {	// RAR v5.0
+		return true;
+	}
+	
+	// Image formats (often compressed)
+	if b"\xff\xd8\xff".iter().all(|item| data.contains(item)) {	// JPEG
+		return true;
+	}
+	if b"\x89PNG\r\n\x1a\n".iter().all(|item| data.contains(item)) {	// PNG
+		return true;
+	}
+	if b"GIF8".iter().all(|item| data.contains(item)) {	// GIF87a or GIF89a
+		return true;
+	}
+	
+	// PDF (often contains compressed streams)
+	if b"%PDF-".iter().all(|item| data.contains(item)) {	// PDF
+		return true;
+	}
+	
+	// Executable formats (can have compressed sections)
+	// Could check for UPX-packed executables specifically
+	if b"\x7fELF".iter().all(|item| data.contains(item)) {	// ELF binary
+		return true;
+	}
+	if b"MZ".iter().all(|item| data.contains(item)) {	// Windows PE
+		return true;
+	}
+	
+	return false;
 }
 
 fn calculate_entropy(bytes: &Vec<u8>) -> f32
@@ -74,7 +116,7 @@ fn calculate_entropy(bytes: &Vec<u8>) -> f32
 		}
 	}
 	
-	println!("{:.2} ", entropy);
+	//println!("{:.2} ", entropy);
 	
 	return entropy;
 }
@@ -83,17 +125,6 @@ fn main() -> io::Result<()> {
 	let file_path = "dump.bin";
 
 	let bytes = Arc::new(fs::read(file_path)?);
-
-	// Now 'bytes' contains the binary data as a Vec<u8>
-	println!("Read {} bytes from the file.", bytes.len());
-
-	// You can iterate through the bytes or process them as needed
-	for byte in bytes.iter().take(10) { // Print the first 10 bytes as an example
-		print!("{:02X} ", byte);
-	}
-	println!();
-	
-	println!("bytes per thread {}", bytes.len()/16);
 	
 	let mut children = vec![];
 	
@@ -108,6 +139,8 @@ fn main() -> io::Result<()> {
 		scan_memory_dump(slice, None, None);
 		}));
 	}
+	
+	println!("Hello from main!");
 
 	for child in children {
 		// Wait for the thread to finish. Returns a result.
