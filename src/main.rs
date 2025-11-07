@@ -22,7 +22,6 @@
  */
 
 use std::fs;
-use std::io;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
@@ -31,7 +30,6 @@ use std::error::Error;
 #[derive(Clone)]
 struct PotentialKey
 {
-	pos: usize,
 	bytes: Vec<u8>,
 	entropy: f32
 }
@@ -70,7 +68,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		keys.push(PotentialKey { pos: i, bytes: vec.clone(), entropy: entropy });
+		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
 		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
 		if keys.len() > 64 { keys.pop(); }
 	}
