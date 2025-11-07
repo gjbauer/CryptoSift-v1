@@ -26,7 +26,9 @@ use std::io;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
+use std::error::Error;
 
+#[derive(Clone)]
 struct PotentialKey
 {
 	pos: usize,
@@ -154,10 +156,33 @@ fn calculate_entropy(bytes: &Vec<u8>) -> f32
 	return entropy;
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
 	let args: Vec<String> = std::env::args().collect();
 	// TODO: Implement usage message and optional arguments
-	let file_path = "dump.bin";
+	let mut chunk_size: Option<usize> = None;
+	let mut stride: Option<usize> = None;
+	println!("argc = {}", args.len());
+	let usage = r#"cryptosift: Cold Boot Data Processing and Encryption Forensics Tool
+Copyright (c) 2025 Gabriel Bauer All rights reserved.
+Usage:
+	cryptosift [options] /path/to/data-dump /path/to/keyfile-out/directory"#;
+	if args.len() < 3 {
+		println!("{}", usage.to_string());
+		std::process::exit(1);
+	}
+	else if args.len() > 3 {
+		for i in (1..=args.len()-2).step_by(2) {
+			if args[i] == "-cs" {
+				chunk_size = args[i+1].parse().ok();
+			}
+			if args[i] == "-st" {
+				stride = args[i+1].parse().ok();
+			}
+		}
+	}
+	
+	let output_dir = &args[args.len() - 1];
+	let file_path = &args[args.len() - 2];
 
 	let bytes = Arc::new(fs::read(file_path)?);
 	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
@@ -172,7 +197,7 @@ fn main() -> io::Result<()> {
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		scan_memory_dump(slice, None, None, Sender{ tx: tx_clone, id: i });
+		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: tx_clone, id: i });
 		}));
 	}
 	drop(tx);
@@ -187,9 +212,22 @@ fn main() -> io::Result<()> {
 	println!("100 % into dump...");
 	println!("Dump processed!!");
 
+	let mut keys_super = vec![];
 	for child in children {
 		// Wait for the thread to finish. Returns a result.
-		let _ = child.join();
+		let output = child.join();
+		keys_super.push(output);
+	}
+	let mut keys: Vec<PotentialKey> = keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect();
+	
+	keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+	
+	keys = keys[0..64].to_vec();
+	
+	println!("Writing potential keys to files in directory...");
+	
+	for i in 0..64 {
+		fs::write(output_dir.to_string()+"/"+&i.to_string()+".bin", &keys[i].bytes)?;
 	}
 
 	Ok(())
