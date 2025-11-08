@@ -26,12 +26,15 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 use std::error::Error;
+use std::io::prelude::*;
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
 
 #[derive(Clone)]
 struct PotentialKey
 {
 	bytes: Vec<u8>,
-	entropy: f32
+	meta_score: f32
 }
 
 struct Message
@@ -48,7 +51,7 @@ struct Sender
 
 fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
 {
-	let actual_stride = stride.unwrap_or_else(|| 16);
+	let actual_stride = stride.unwrap_or_else(|| 4);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
 	let mut keys: Vec<PotentialKey> = Vec::new();
 	
@@ -64,17 +67,53 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 		
 		// Filter 2: Minimum entropy threshold
 		let entropy = calculate_entropy(&vec);
-		if entropy < 4.65 {
+		if entropy < 4.75 {
 			continue;
 		}
 		
-		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
-		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
-		if keys.len() > 64 { keys.pop(); }
+		// Filter 3: Minimum compression threshold
+		let ratio = calculate_compression_ratio(&vec);
+		if ratio < 1.3 {
+			continue;
+		}
+		
+		keys.push(PotentialKey { bytes: vec.clone(), meta_score: calculate_meta_score(entropy, ratio) });
+		keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
+		if keys.len() > 128 { keys.pop(); }
 	}
 	
 	drop(tx);
 	keys
+}
+
+fn is_known_encryption(data: &Vec<u8>) -> bool
+{
+	// LUKS1 & LUKS2
+	if b"LUKS\xba\xbe".iter().all(|item| data.contains(item)) {
+		println!("LUKS header found!");
+		println!("Verified encrypted device!");
+		return true;
+	}
+	if b"\x0b\x01\x00\x00".iter().all(|item| data.contains(item)) {
+		println!("ZFS signature found!");
+		let mut zfs_encryption_indicators: Vec<&[u8]> = vec![];
+		zfs_encryption_indicators.push(b"encryption");
+		zfs_encryption_indicators.push(b"aes-256-ccm");
+		zfs_encryption_indicators.push(b"aes-128-ccm");
+		zfs_encryption_indicators.push(b"aes-256-gcm");
+		zfs_encryption_indicators.push(b"keyformat");
+		zfs_encryption_indicators.push(b"pbkdf2");
+		zfs_encryption_indicators.push(b"wrappingkey");
+		zfs_encryption_indicators.push(b"keystatus");
+		for indicator in zfs_encryption_indicators {
+			if indicator.iter().all(|item| data.contains(item)) {
+				println!("Verified ZFS is encrypted device!");
+				return true;
+			}
+		}
+	}
+	
+	return false;
 }
 
 fn is_known_compressed_format(data: &Vec<u8>) -> bool
@@ -135,6 +174,19 @@ fn is_known_compressed_format(data: &Vec<u8>) -> bool
 	return false;
 }
 
+fn calculate_meta_score(entropy: f32, ratio: f32) -> f32
+{
+	return ((entropy/8.0)*0.7) + (ratio*0.3);
+}
+
+fn calculate_compression_ratio(bytes: &Vec<u8>) -> f32
+{
+	let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+	let _ = e.write_all(&bytes[0..bytes.len()]);
+	let cmp_bytes = e.finish().unwrap();
+	return cmp_bytes.len() as f32 / bytes.len() as f32;
+}
+
 fn calculate_entropy(bytes: &Vec<u8>) -> f32
 {
 	let mut counts: [u32; 256] = [0; 256];
@@ -156,10 +208,8 @@ fn calculate_entropy(bytes: &Vec<u8>) -> f32
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let args: Vec<String> = std::env::args().collect();
-	// TODO: Implement usage message and optional arguments
 	let mut chunk_size: Option<usize> = None;
 	let mut stride: Option<usize> = None;
-	println!("argc = {}", args.len());
 	let usage = r#"cryptosift: Cold Boot Data Processing and Encryption Forensics Tool
 Copyright (c) 2025 Gabriel Bauer All rights reserved.
 Usage:
@@ -218,7 +268,7 @@ Usage:
 	}
 	let mut keys: Vec<PotentialKey> = keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect();
 	
-	keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+	keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
 	
 	keys = keys[0..64].to_vec();
 	
