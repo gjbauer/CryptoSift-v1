@@ -250,11 +250,9 @@ Usage:
 	
 	keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
 	
-	keys = keys[0..64].to_vec();
-	
 	println!("Writing potential keys to files in directory...");
 	
-	for i in 0..64 {
+	for i in 0..keys.len() {
 		fs::write(output_dir.to_string()+"/"+&i.to_string()+".bin", &keys[i].bytes)?;
 	}
 
