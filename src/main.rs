@@ -235,7 +235,7 @@ Usage:
 		queue.retain(|item: &Message| item.id != received_message.id);
 		queue.push(received_message);
 		let j: usize = queue.iter().map(|s| s.progress).sum();
-		print!("{:3.2} % into dump...\r", (100 * j / (bytes.len())));
+		print!("{:3.2} % into dump...\r", (100 * j as f32 / bytes.len() as f32));
 	}
 	println!("100 % into dump...");
 	println!("Dump processed!!");
