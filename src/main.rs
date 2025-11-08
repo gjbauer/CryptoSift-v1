@@ -49,7 +49,7 @@ struct Sender
 	id: usize
 }
 
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
+fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, compression: bool, tx: Sender) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 4);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
@@ -71,49 +71,22 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		// Filter 3: Minimum compression threshold
-		let ratio = calculate_compression_ratio(&vec);
-		if ratio < 1.3 {
-			continue;
+		let mut ratio: f32 = 0.0;
+		if compression {
+			// Filter 3: Minimum compression threshold
+			ratio = calculate_compression_ratio(&vec);
+			if ratio < 1.3 {
+				continue;
+			}
 		}
 		
-		keys.push(PotentialKey { bytes: vec.clone(), meta_score: calculate_meta_score(entropy, ratio) });
+		keys.push(PotentialKey { bytes: vec.clone(), meta_score: calculate_meta_score(entropy, ratio, compression) });
 		keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
 		if keys.len() > 128 { keys.pop(); }
 	}
 	
 	drop(tx);
 	keys
-}
-
-fn is_known_encryption(data: &Vec<u8>) -> bool
-{
-	// LUKS1 & LUKS2
-	if b"LUKS\xba\xbe".iter().all(|item| data.contains(item)) {
-		println!("LUKS header found!");
-		println!("Verified encrypted device!");
-		return true;
-	}
-	if b"\x0b\x01\x00\x00".iter().all(|item| data.contains(item)) {
-		println!("ZFS signature found!");
-		let mut zfs_encryption_indicators: Vec<&[u8]> = vec![];
-		zfs_encryption_indicators.push(b"encryption");
-		zfs_encryption_indicators.push(b"aes-256-ccm");
-		zfs_encryption_indicators.push(b"aes-128-ccm");
-		zfs_encryption_indicators.push(b"aes-256-gcm");
-		zfs_encryption_indicators.push(b"keyformat");
-		zfs_encryption_indicators.push(b"pbkdf2");
-		zfs_encryption_indicators.push(b"wrappingkey");
-		zfs_encryption_indicators.push(b"keystatus");
-		for indicator in zfs_encryption_indicators {
-			if indicator.iter().all(|item| data.contains(item)) {
-				println!("Verified ZFS is encrypted device!");
-				return true;
-			}
-		}
-	}
-	
-	return false;
 }
 
 fn is_known_compressed_format(data: &Vec<u8>) -> bool
@@ -174,9 +147,10 @@ fn is_known_compressed_format(data: &Vec<u8>) -> bool
 	return false;
 }
 
-fn calculate_meta_score(entropy: f32, ratio: f32) -> f32
+fn calculate_meta_score(entropy: f32, ratio: f32, compression: bool) -> f32
 {
-	return ((entropy/8.0)*0.7) + (ratio*0.3);
+	if compression { return ((entropy/8.0)*0.7) + (ratio*0.3); }
+	else { return entropy/8.0; }
 }
 
 fn calculate_compression_ratio(bytes: &Vec<u8>) -> f32
@@ -210,6 +184,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let args: Vec<String> = std::env::args().collect();
 	let mut chunk_size: Option<usize> = None;
 	let mut stride: Option<usize> = None;
+	let mut compression = true;
 	let usage = r#"cryptosift: Cold Boot Data Processing and Encryption Forensics Tool
 Copyright (c) 2025 Gabriel Bauer All rights reserved.
 Usage:
@@ -219,12 +194,17 @@ Usage:
 		std::process::exit(1);
 	}
 	else if args.len() > 3 {
-		for i in (1..=args.len()-2).step_by(2) {
+		for mut i in 1..=args.len()-2 {
 			if args[i] == "-cs" {
 				chunk_size = args[i+1].parse().ok();
+				i += 1;
 			}
 			if args[i] == "-st" {
 				stride = args[i+1].parse().ok();
+				i += 1;
+			}
+			if args[i] == "-nc" {
+				compression = false;
 			}
 		}
 	}
@@ -245,7 +225,7 @@ Usage:
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: tx_clone, id: i });
+		return scan_memory_dump(slice, chunk_size, stride, compression, Sender{ tx: tx_clone, id: i });
 		}));
 	}
 	drop(tx);
