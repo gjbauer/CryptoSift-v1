@@ -21,20 +21,29 @@
  * SOFTWARE.
  */
 
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+
 use std::fs;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 use std::error::Error;
-use std::io::prelude::*;
-use flate2::Compression;
-use flate2::write::ZlibEncoder;
+
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+impl AES_ctx {
+    pub fn new() -> Self {
+        AES_ctx { RoundKey: [0; 176], Iv: [0; 16] }
+    }
+}
 
 #[derive(Clone)]
 struct PotentialKey
 {
 	bytes: Vec<u8>,
-	meta_score: f32
+	entropy: f32
 }
 
 struct Message
@@ -49,7 +58,7 @@ struct Sender
 	id: usize
 }
 
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, compression: bool, tx: Sender) -> Vec<PotentialKey>
+fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 4);
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
@@ -60,10 +69,10 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
 		
-		// Filter 1: Skip known compressed formats
+		/*// Filter 1: Skip known compressed formats
 		if is_known_compressed_format(&vec) {
 			continue;
-		}
+		}*/
 		
 		// Filter 2: Minimum entropy threshold
 		let entropy = calculate_entropy(&vec);
@@ -71,17 +80,10 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		let mut ratio: f32 = 0.0;
-		if compression {
-			// Filter 3: Minimum compression threshold
-			ratio = calculate_compression_ratio(&vec);
-			if ratio < 1.3 {
-				continue;
-			}
-		}
+		let mut my_struct = AES_ctx::new();
 		
-		keys.push(PotentialKey { bytes: vec.clone(), meta_score: calculate_meta_score(entropy, ratio, compression) });
-		keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
+		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
+		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
 		if keys.len() > 128 { keys.pop(); }
 	}
 	
@@ -89,7 +91,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	keys
 }
 
-fn is_known_compressed_format(data: &Vec<u8>) -> bool
+/*fn is_known_compressed_format(data: &Vec<u8>) -> bool
 {
 	// GZIP (.gz, .tar.gz)
 	if b"\x1f\x8b".iter().all(|item| data.contains(item)) {
@@ -145,21 +147,13 @@ fn is_known_compressed_format(data: &Vec<u8>) -> bool
 	}
 	
 	return false;
-}
+}*/
 
-fn calculate_meta_score(entropy: f32, ratio: f32, compression: bool) -> f32
+/*fn calculate_meta_score(entropy: f32, ratio: f32, compression: bool) -> f32
 {
 	if compression { return ((entropy/8.0)*0.7) + (ratio*0.3); }
 	else { return entropy/8.0; }
-}
-
-fn calculate_compression_ratio(bytes: &Vec<u8>) -> f32
-{
-	let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
-	let _ = e.write_all(&bytes[0..bytes.len()]);
-	let cmp_bytes = e.finish().unwrap();
-	return cmp_bytes.len() as f32 / bytes.len() as f32;
-}
+}*/
 
 fn calculate_entropy(bytes: &Vec<u8>) -> f32
 {
@@ -184,7 +178,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let args: Vec<String> = std::env::args().collect();
 	let mut chunk_size: Option<usize> = None;
 	let mut stride: Option<usize> = None;
-	let mut compression = true;
 	let usage = r#"cryptosift: Cold Boot Data Processing and Encryption Forensics Tool
 Copyright (c) 2025 Gabriel Bauer All rights reserved.
 Usage:
@@ -194,17 +187,12 @@ Usage:
 		std::process::exit(1);
 	}
 	else if args.len() > 3 {
-		for mut i in 1..=args.len()-2 {
+		for i in (1..=args.len()-2).step_by(2) {
 			if args[i] == "-cs" {
 				chunk_size = args[i+1].parse().ok();
-				i += 1;
 			}
 			if args[i] == "-st" {
 				stride = args[i+1].parse().ok();
-				i += 1;
-			}
-			if args[i] == "-nc" {
-				compression = false;
 			}
 		}
 	}
@@ -225,7 +213,7 @@ Usage:
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		return scan_memory_dump(slice, chunk_size, stride, compression, Sender{ tx: tx_clone, id: i });
+		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: tx_clone, id: i });
 		}));
 	}
 	drop(tx);
@@ -248,7 +236,7 @@ Usage:
 	}
 	let mut keys: Vec<PotentialKey> = keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect();
 	
-	keys.sort_by(|a, b| b.meta_score.total_cmp(&a.meta_score));
+	keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
 	
 	println!("Writing potential keys to files in directory...");
 	
