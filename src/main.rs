@@ -69,10 +69,10 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 		if !tx.tx.is_none() { tx.tx.clone().unwrap().send(Message { progress: i, id: tx.id} ).unwrap(); }
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
 		
-		/*// Filter 1: Skip known compressed formats
+		// Filter 1: Skip known compressed formats
 		if is_known_compressed_format(&vec) {
 			continue;
-		}*/
+		}
 		
 		// Filter 2: Minimum entropy threshold
 		let entropy = calculate_entropy(&vec);
@@ -122,63 +122,166 @@ fn generate_round_keys(slice: &[u8]) -> AES_ctx
 	ctx
 }
 
-/*fn is_known_compressed_format(data: &Vec<u8>) -> bool
+fn is_known_compressed_format(data: &Vec<u8>) -> bool
 {
 	// GZIP (.gz, .tar.gz)
-	if b"\x1f\x8b".iter().all(|item| data.contains(item)) {
-		return true;
+	let mut all_bytes_found: bool = false;
+	for i in 0..data.len() {
+		for j in 0..b"\x1f\x8b".len() {
+			if data[i] == b"\x1f\x8b"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	// BZIP2 (.bz2, .tar.bz2) 
-	if b"BZh".iter().all(|item| data.contains(item)) {
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"BZh".len() {
+			if data[i] == b"BZh"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	// XZ (.xz, .tar.xz)
-	if b"\xfd7zXZ\x00".iter().all(|item| data.contains(item)) {
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"\xfd7zXZ\x00".len() {
+			if data[i] == b"\xfd7zXZ\x00"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	// ZIP (.zip, .jar, .docx)
-	if b"PK\x03\x00".iter().all(|item| data.contains(item)) {
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"PK\x03\x00".len() {
+			if data[i] == b"PK\x03\x00"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	// 7-Zip (.7z)
-	if b"7z\xbc\xaf\x27\x1c".iter().all(|item| data.contains(item)) {
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"7z\xbc\xaf\x27\x1c".len() {
+			if data[i] == b"7z\xbc\xaf\x27\x1c"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	// RAR (.rar)
-	if b"Rar!\x1a\x07\x00".iter().all(|item| data.contains(item)) {	// RAR v1.5+
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"Rar!\x1a\x07\x00".len() {	// RAR v1.5+
+			if data[i] == b"Rar!\x1a\x07\x00"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
-	if b"Rar!\x1a\x07\x01".iter().all(|item| data.contains(item)) {	// RAR v5.0
-		return true;
+	if all_bytes_found { return all_bytes_found; }
+	for i in 0..data.len() {
+		for j in 0..b"Rar!\x1a\x07\x01".len() {	// RAR v5.0
+			if data[i] == b"Rar!\x1a\x07\x01"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	
 	// Image formats (often compressed)
-	if b"\xff\xd8\xff".iter().all(|item| data.contains(item)) {	// JPEG
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"\xff\xd8\xff".len() {	// JPEG
+			if data[i] == b"\xff\xd8\xff"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
-	if b"\x89PNG\r\n\x1a\n".iter().all(|item| data.contains(item)) {	// PNG
-		return true;
+	if all_bytes_found { return all_bytes_found; }
+	for i in 0..data.len() {
+		for j in 0..b"\x89PNG\r\n\x1a\n".len() {	// PNG
+			if data[i] == b"\x89PNG\r\n\x1a\n"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
-	if b"GIF8".iter().all(|item| data.contains(item)) {	// GIF87a or GIF89a
-		return true;
+	if all_bytes_found { return all_bytes_found; }
+	for i in 0..data.len() {
+		for j in 0..b"GIF8".len() {	// GIF87a or GIF89a
+			if data[i] == b"GIF8"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	
 	// PDF (often contains compressed streams)
-	if b"%PDF-".iter().all(|item| data.contains(item)) {	// PDF
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"%PDF-".len() {	// PDF
+			if data[i] == b"%PDF-"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
+	if all_bytes_found { return all_bytes_found; }
 	
 	// Executable formats (can have compressed sections)
 	// Could check for UPX-packed executables specifically
-	if b"\x7fELF".iter().all(|item| data.contains(item)) {	// ELF binary
-		return true;
+	for i in 0..data.len() {
+		for j in 0..b"\x7fELF".len() {	// ELF binary
+			if data[i] == b"\x7fELF"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
-	if b"MZ".iter().all(|item| data.contains(item)) {	// Windows PE
-		return true;
+	if all_bytes_found { return all_bytes_found; }
+	for i in 0..data.len() {
+		for j in 0..b"MZ".len() {	// Windows PE
+			if data[i] == b"MZ"[j] {
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+			}
+		}
 	}
-	
-	return false;
-}*/
+	return all_bytes_found;
+}
 
 fn calculate_entropy(bytes: &Vec<u8>) -> f32
 {
