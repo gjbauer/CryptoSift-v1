@@ -64,11 +64,10 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
 	let mut keys: Vec<PotentialKey> = Vec::new();
 	
-	for i in (0..=bytes.len()-actual_chunk_size).step_by(actual_stride)
+	for i in (0..=bytes.len()-actual_chunk_size-240).step_by(actual_stride)
 	{
 		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
-		let slice = &bytes[i..i+actual_chunk_size];
 		
 		/*// Filter 1: Skip known compressed formats
 		if is_known_compressed_format(&vec) {
@@ -81,13 +80,10 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		let mut ctx = AES_ctx::new();
-		let raw_ctx: *mut AES_ctx = &mut ctx;
-		unsafe {
-			AES_init_ctx(raw_ctx, slice.as_ptr());
-		}
-		for byte in ctx.RoundKey.iter() {
-			println!("{}", byte);
+		//Filter 3: AES Rounds Keys
+		let maybe_key = is_potential_key(&bytes[i..i+actual_chunk_size+240]);
+		if !maybe_key {
+			continue;
 		}
 		
 		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
@@ -97,6 +93,33 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	
 	drop(tx);
 	keys
+}
+
+fn is_potential_key(slice: &[u8]) -> bool
+{
+	let mut all_bytes_found: bool = false;
+	let ctx = generate_round_keys(&slice[0..32]);
+	for j in 0..ctx.RoundKey.len() {
+		if ctx.RoundKey[j..j+1] == slice[32+j..32+j+1]{
+			all_bytes_found = true;
+		}
+		else {
+			all_bytes_found = false;
+		}
+	}
+	
+	all_bytes_found
+}
+
+fn generate_round_keys(slice: &[u8]) -> AES_ctx
+{
+	let master_key = slice.as_ptr();
+	let mut ctx = AES_ctx::new();
+	let raw_ctx: *mut AES_ctx = &mut ctx;
+	unsafe {
+		AES_init_ctx(raw_ctx, master_key);
+	}
+	ctx
 }
 
 /*fn is_known_compressed_format(data: &Vec<u8>) -> bool
@@ -155,12 +178,6 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	}
 	
 	return false;
-}*/
-
-/*fn calculate_meta_score(entropy: f32, ratio: f32, compression: bool) -> f32
-{
-	if compression { return ((entropy/8.0)*0.7) + (ratio*0.3); }
-	else { return entropy/8.0; }
 }*/
 
 fn calculate_entropy(bytes: &Vec<u8>) -> f32
