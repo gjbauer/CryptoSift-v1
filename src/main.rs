@@ -54,7 +54,7 @@ struct Message
 
 struct Sender
 {
-	tx: mpsc::Sender<Message>,
+	tx: Option<mpsc::Sender<Message>>,
 	id: usize
 }
 
@@ -66,7 +66,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	
 	for i in (0..=bytes.len()-actual_chunk_size-240).step_by(actual_stride)
 	{
-		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
+		if !tx.tx.is_none() { tx.tx.clone().unwrap().send(Message { progress: i, id: tx.id} ).unwrap(); }
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
 		
 		/*// Filter 1: Skip known compressed formats
@@ -238,7 +238,7 @@ Usage:
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: tx_clone, id: i });
+		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: Some(tx_clone), id: i });
 		}));
 	}
 	drop(tx);
@@ -248,9 +248,19 @@ Usage:
 		queue.retain(|item: &Message| item.id != received_message.id);
 		queue.push(received_message);
 		let j: usize = queue.iter().map(|s| s.progress).sum();
-		print!("{:3.2} % into dump...\r", (100.0 * j as f32 / bytes.len() as f32));
+		if queue.iter().any(|thread| thread.id == 15) { print!("{:3.2} % into dump...\r", (100.0 * j as f32 / bytes.len() as f32)); }
 	}
 	println!("100.00 % into dump...");
+	println!("Processing area between threads");
+	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
+	for i in 0..=14 {
+		let bytes_clone = Arc::clone(&bytes);
+		// Spin up another thread
+		children.push(thread::spawn(move || {
+		let slice = &bytes_clone[(i+1)*(bytes_clone.len()/16)-240..(i+1)*(bytes_clone.len()/16)+240];
+		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: None, id: i });
+		}));
+	}
 	println!("Dump processed!!");
 
 	let mut keys_super = vec![];
