@@ -35,7 +35,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 impl AES_ctx {
     pub fn new() -> Self {
-        AES_ctx { RoundKey: [0; 176], Iv: [0; 16] }
+        AES_ctx { RoundKey: [0; 240], Iv: [0; 16] }
     }
 }
 
@@ -68,6 +68,7 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 	{
 		tx.tx.send(Message { progress: i, id: tx.id} ).unwrap();
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
+		let slice = &bytes[i..i+actual_chunk_size];
 		
 		/*// Filter 1: Skip known compressed formats
 		if is_known_compressed_format(&vec) {
@@ -80,7 +81,14 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		let mut my_struct = AES_ctx::new();
+		let mut ctx = AES_ctx::new();
+		let raw_ctx: *mut AES_ctx = &mut ctx;
+		unsafe {
+			AES_init_ctx(raw_ctx, slice.as_ptr());
+		}
+		for byte in ctx.RoundKey.iter() {
+			println!("{}", byte);
+		}
 		
 		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
 		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));

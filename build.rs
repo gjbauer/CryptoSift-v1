@@ -6,6 +6,7 @@ use std::path::PathBuf;
 fn main() {
 	let bindings = bindgen::Builder::default()
 		.header("src/tiny-AES-c/aes.h")
+		.clang_arg("-DAES256")
 		.parse_callbacks(Box::new(CargoCallbacks::new()))
 		.generate()
 		.expect("Unable to generate bindings");
@@ -17,5 +18,6 @@ fn main() {
 	
 	cc::Build::new()
 	.file("src/tiny-AES-c/aes.c")
+	.flag("-DAES256")
 	.compile("tiny-AES-c");
 }
