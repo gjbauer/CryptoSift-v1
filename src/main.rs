@@ -58,10 +58,10 @@ struct Sender
 	id: usize
 }
 
-fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
+fn filter_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 4);
-	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
+	let actual_chunk_size = chunk_size.unwrap_or_else(|| 64);
 	let mut keys: Vec<PotentialKey> = Vec::new();
 	
 	for i in (0..=bytes.len()-actual_chunk_size-240).step_by(actual_stride)
@@ -80,31 +80,64 @@ fn scan_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usiz
 			continue;
 		}
 		
-		//Filter 3: AES Rounds Keys
+		/*//Filter 3: AES Rounds Keys
 		let maybe_key = is_potential_key(&bytes[i..i+actual_chunk_size+240]);
 		if !maybe_key {
 			continue;
-		}
+		}*/
 		
 		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
 		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
-		if keys.len() > 128 { keys.pop(); }
+		if keys.len() > 256 { keys.pop(); }
 	}
 	
 	drop(tx);
 	keys
 }
 
-fn is_potential_key(slice: &[u8]) -> bool
+fn filter_potential_keys(pks: &[PotentialKey], bytes: &Vec<u8>, tx: Sender) -> Vec<PotentialKey>
+{
+	let mut filtered = Vec::new();
+	for (i, pk) in pks.iter().enumerate() {
+		tx.tx.clone().unwrap().send(Message { progress: i, id: tx.id }).unwrap();
+		if is_potential_key(&pk.bytes, bytes) {
+			filtered.push(pk.clone());
+		}
+	}
+	filtered
+}
+
+fn is_potential_key(key: &Vec<u8>, bytes: &Vec<u8>) -> bool
 {
 	let mut all_bytes_found: bool = false;
-	let ctx = generate_round_keys(&slice[0..32]);
-	for j in 0..ctx.RoundKey.len() {
-		if ctx.RoundKey[j..j+1] == slice[32+j..32+j+1]{
-			all_bytes_found = true;
+	let ctx1 = generate_round_keys(&key[0..32]);
+	for i in 0..bytes.len()-240 {
+		for j in 0..ctx1.RoundKey.len() {
+			if ctx1.RoundKey[j..j+1] == bytes[i+j..i+j+1]{
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+				break;
+			}
 		}
-		else {
-			all_bytes_found = false;
+		if all_bytes_found {
+			break;
+		}
+	}
+	let ctx2 = generate_round_keys(&key[32..64]);
+	for i in 0..bytes.len()-240 {
+		for j in 0..ctx2.RoundKey.len() {
+			if ctx2.RoundKey[j..j+1] == bytes[i+j..i+j+1]{
+				all_bytes_found = true;
+			}
+			else {
+				all_bytes_found = false;
+				break;
+			}
+		}
+		if all_bytes_found {
+			break;
 		}
 	}
 	
@@ -341,30 +374,31 @@ Usage:
 		let mut end = (i+1)*(bytes_clone.len()/16);
 		if i == 15 { end = bytes_clone.len(); }
 		let slice = &bytes_clone[i*(bytes_clone.len()/16)..end];
-		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: Some(tx_clone), id: i });
+		return filter_memory_dump(slice, chunk_size, stride, Sender{ tx: Some(tx_clone), id: i });
 		}));
 	}
 	drop(tx);
 	
 	let mut queue = vec![];
-	for received_message in rx {
+	for received_message in &rx {
 		queue.retain(|item: &Message| item.id != received_message.id);
 		queue.push(received_message);
 		let j: usize = queue.iter().map(|s| s.progress).sum();
-		if queue.iter().any(|thread| thread.id == 15) { print!("{:3.2} % into dump...\r", (100.0 * j as f32 / bytes.len() as f32)); }
+		print!("{:3.2} % into entropy and known-compreesed types tests...\r", (100.0 * j as f32 / bytes.len() as f32));
 	}
-	println!("100.00 % into dump...");
+	drop(rx);
+	println!("100.00 % into entropy and known-compreesed types tests...");
+	
 	println!("Processing area between threads");
-	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
 	for i in 0..=14 {
 		let bytes_clone = Arc::clone(&bytes);
 		// Spin up another thread
 		children.push(thread::spawn(move || {
 		let slice = &bytes_clone[(i+1)*(bytes_clone.len()/16)-240..(i+1)*(bytes_clone.len()/16)+240];
-		return scan_memory_dump(slice, chunk_size, stride, Sender{ tx: None, id: i });
+		return filter_memory_dump(slice, chunk_size, stride, Sender{ tx: None, id: i });
 		}));
 	}
-	println!("Dump processed!!");
+	println!("Entropy and known-compression tests finished!!");
 
 	let mut keys_super = vec![];
 	for child in children {
@@ -372,14 +406,61 @@ Usage:
 		let output = child.join();
 		keys_super.push(output);
 	}
-	let mut keys: Vec<PotentialKey> = keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect();
 	
-	keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+	let mut keys: Arc<Vec<PotentialKey>> = Arc::new(keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect());
 	
-	println!("Writing potential keys to files in directory...");
+	println!("Found {} potential keys!!", keys.len());
 	
-	for i in 0..keys.len() {
-		fs::write(output_dir.to_string()+"/"+&i.to_string()+".bin", &keys[i].bytes)?;
+	if let Some(keys_ref) = Arc::get_mut(&mut keys) {
+		keys_ref.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+	}
+	
+	children = vec![];
+	
+	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
+	
+	for i in 0..4 {
+		let bytes_clone = Arc::clone(&bytes);
+		let keys_clone = Arc::clone(&keys);
+		let tx_clone = tx.clone();
+		// Spin up another thread
+		children.push(thread::spawn(move || {
+		let mut end = (i+1)*(keys_clone.len()/4);
+		if i == 3 { end = keys_clone.len(); }
+		let slice = &keys_clone[i*(keys_clone.len()/4)..end];
+		return filter_potential_keys(slice, &bytes_clone, Sender{ tx: Some(tx_clone), id: i });
+		}));
+	}
+	drop(tx);
+	
+	queue = vec![];
+	for received_message in &rx {
+		queue.retain(|item: &Message| item.id != received_message.id);
+		queue.push(received_message);
+		let j: usize = queue.iter().map(|s| s.progress).sum();
+		print!("{:3.2} % into round keys tests...\r", (100.0 * j as f32 / keys.len() as f32));
+	}
+	drop(rx);
+	println!("100.00 % into round keys tests...");
+	
+	let mut final_keys_super = vec![];
+	for child in children {
+		// Wait for the thread to finish. Returns a result.
+		let output = child.join();
+		final_keys_super.push(output);
+	}
+	
+	let mut final_keys: Vec<PotentialKey> = final_keys_super.into_iter().flat_map(|result| result.unwrap_or_else(|_| Vec::new())).collect();
+	final_keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
+	
+	println!("Memory dump processed!!");
+	
+	println!("Filtered to {} potential keys!!", final_keys.len());
+	
+	if final_keys.len() > 0 { println!("Writing potential keys to files in directory..."); }
+	
+	for i in 0..final_keys.len() {
+		fs::write(output_dir.to_string()+"/"+&i.to_string()+".bin", &final_keys[i].bytes)?;
 	}
 
 	Ok(())
