@@ -5,7 +5,7 @@
 A Cold Boot Attack is when somebody who has access to a machine
 which is encrypted, but has already been turned on and decrypted,
 and which does not employ specific mitigations such as a secure
-enclave or memory zeroing on startup is able to freeze the
+enclave or memory zeroing on startup, is able to freeze the
 machine's RAM to increase data remanance and boot into a custom
 application designed to scrape the contents of the RAM into
 a physical dump file containing the contents of the system's RAM.
