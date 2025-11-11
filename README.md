@@ -49,7 +49,7 @@ calculate the Hamming distance between the newly generated key
 schedule and the potential key schedule. If it falls within the
 set maximum Hamming distance, we have likely found our key!!
 
-## What was successfuly about this iteration...
+## What was successful about this iteration...
 
 Though I was unable to achieve the original desired result, this
 attempt taught me a lot of very valuable things about coding
