@@ -110,36 +110,56 @@ fn filter_potential_keys(pks: &[PotentialKey], bytes: &Vec<u8>, tx: Sender) -> V
 fn is_potential_key(key: &Vec<u8>, bytes: &Vec<u8>) -> bool
 {
 	let mut all_bytes_found: bool = false;
-	let ctx1 = generate_round_keys(&key[0..32]);
-	for i in 0..bytes.len()-240 {
-		for j in 0..ctx1.RoundKey.len() {
-			if ctx1.RoundKey[j..j+1] == bytes[i+j..i+j+1]{
-				all_bytes_found = true;
+	let mut ctx = generate_round_keys(&key[0..32]);
+	for k in 0..15 {
+		let start = k*(ctx.RoundKey.len()/15);
+		let mut end = (k+1)*(ctx.RoundKey.len()/15);
+		if k == 14 { end = ctx.RoundKey.len(); }
+		for i in 0..bytes.len()-16 {
+			for j in start..end {
+				if ctx.RoundKey[j..j+1] == bytes[i+(j-start)..i+(j-start)+1]{
+					all_bytes_found = true;
+				}
+				else {
+					all_bytes_found = false;
+					break;
+				}
 			}
-			else {
-				all_bytes_found = false;
+			if all_bytes_found {
 				break;
 			}
 		}
-		if all_bytes_found {
-			break;
+		if !all_bytes_found {
+			return false;
+		} else {
+			println!("All bytes found for first key...");
 		}
 	}
-	let ctx2 = generate_round_keys(&key[32..64]);
-	for i in 0..bytes.len()-240 {
-		for j in 0..ctx2.RoundKey.len() {
-			if ctx2.RoundKey[j..j+1] == bytes[i+j..i+j+1]{
-				all_bytes_found = true;
+	ctx = generate_round_keys(&key[32..64]);
+	/*for k in 0..15 {
+		let start = k*(ctx.RoundKey.len()/15);
+		let mut end = (k+1)*(ctx.RoundKey.len()/15);
+		if k == 14 { end = ctx.RoundKey.len(); }
+		for i in 0..bytes.len()-16 {
+			for j in start..end {
+				if ctx.RoundKey[j..j+1] == bytes[i+(j-start)..i+(j-start)+1]{
+					all_bytes_found = true;
+				}
+				else {
+					all_bytes_found = false;
+					break;
+				}
 			}
-			else {
-				all_bytes_found = false;
+			if all_bytes_found {
 				break;
 			}
 		}
-		if all_bytes_found {
-			break;
+		if !all_bytes_found {
+			return false;
+		} else {
+			println!("All bytes found for second key...");
 		}
-	}
+	}*/
 	
 	all_bytes_found
 }
@@ -419,15 +439,15 @@ Usage:
 	
 	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
 	
-	for i in 0..4 {
+	for i in 0..8 {
 		let bytes_clone = Arc::clone(&bytes);
 		let keys_clone = Arc::clone(&keys);
 		let tx_clone = tx.clone();
 		// Spin up another thread
 		children.push(thread::spawn(move || {
-		let mut end = (i+1)*(keys_clone.len()/4);
-		if i == 3 { end = keys_clone.len(); }
-		let slice = &keys_clone[i*(keys_clone.len()/4)..end];
+		let mut end = (i+1)*(keys_clone.len()/8);
+		if i == 7 { end = keys_clone.len(); }
+		let slice = &keys_clone[i*(keys_clone.len()/8)..end];
 		return filter_potential_keys(slice, &bytes_clone, Sender{ tx: Some(tx_clone), id: i });
 		}));
 	}
