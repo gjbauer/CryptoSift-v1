@@ -61,10 +61,10 @@ struct Sender
 fn filter_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<usize>, tx: Sender) -> Vec<PotentialKey>
 {
 	let actual_stride = stride.unwrap_or_else(|| 4);
-	let actual_chunk_size = chunk_size.unwrap_or_else(|| 64);
+	let actual_chunk_size = chunk_size.unwrap_or_else(|| 32);
 	let mut keys: Vec<PotentialKey> = Vec::new();
 	
-	for i in (0..=bytes.len()-actual_chunk_size-240).step_by(actual_stride)
+	for i in (0..=bytes.len()-actual_chunk_size).step_by(actual_stride)
 	{
 		if !tx.tx.is_none() { tx.tx.clone().unwrap().send(Message { progress: i, id: tx.id} ).unwrap(); }
 		let vec = bytes[i..i+actual_chunk_size].to_vec();
@@ -79,12 +79,6 @@ fn filter_memory_dump(bytes: &[u8], chunk_size: Option<usize>, stride: Option<us
 		if entropy < 4.75 {
 			continue;
 		}
-		
-		/*//Filter 3: AES Rounds Keys
-		let maybe_key = is_potential_key(&bytes[i..i+actual_chunk_size+240]);
-		if !maybe_key {
-			continue;
-		}*/
 		
 		keys.push(PotentialKey { bytes: vec.clone(), entropy: entropy });
 		keys.sort_by(|a, b| b.entropy.total_cmp(&a.entropy));
@@ -131,36 +125,13 @@ fn is_potential_key(key: &Vec<u8>, bytes: &Vec<u8>) -> bool
 		}
 		if !all_bytes_found {
 			return false;
-		} else {
-			println!("All bytes found for first key...");
 		}
 	}
-	ctx = generate_round_keys(&key[32..64]);
-	/*for k in 0..15 {
-		let start = k*(ctx.RoundKey.len()/15);
-		let mut end = (k+1)*(ctx.RoundKey.len()/15);
-		if k == 14 { end = ctx.RoundKey.len(); }
-		for i in 0..bytes.len()-16 {
-			for j in start..end {
-				if ctx.RoundKey[j..j+1] == bytes[i+(j-start)..i+(j-start)+1]{
-					all_bytes_found = true;
-				}
-				else {
-					all_bytes_found = false;
-					break;
-				}
-			}
-			if all_bytes_found {
-				break;
-			}
-		}
-		if !all_bytes_found {
+	if !all_bytes_found {
 			return false;
-		} else {
-			println!("All bytes found for second key...");
-		}
-	}*/
-	
+	} else {
+		println!("All bytes found for key!!");
+	}
 	all_bytes_found
 }
 
@@ -414,7 +385,7 @@ Usage:
 		let bytes_clone = Arc::clone(&bytes);
 		// Spin up another thread
 		children.push(thread::spawn(move || {
-		let slice = &bytes_clone[(i+1)*(bytes_clone.len()/16)-240..(i+1)*(bytes_clone.len()/16)+240];
+		let slice = &bytes_clone[(i+1)*(bytes_clone.len()/16)-32..(i+1)*(bytes_clone.len()/16)+32];
 		return filter_memory_dump(slice, chunk_size, stride, Sender{ tx: None, id: i });
 		}));
 	}
@@ -439,15 +410,15 @@ Usage:
 	
 	let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel();
 	
-	for i in 0..8 {
+	for i in 0..16 {
 		let bytes_clone = Arc::clone(&bytes);
 		let keys_clone = Arc::clone(&keys);
 		let tx_clone = tx.clone();
 		// Spin up another thread
 		children.push(thread::spawn(move || {
-		let mut end = (i+1)*(keys_clone.len()/8);
-		if i == 7 { end = keys_clone.len(); }
-		let slice = &keys_clone[i*(keys_clone.len()/8)..end];
+		let mut end = (i+1)*(keys_clone.len()/16);
+		if i == 15 { end = keys_clone.len(); }
+		let slice = &keys_clone[i*(keys_clone.len()/16)..end];
 		return filter_potential_keys(slice, &bytes_clone, Sender{ tx: Some(tx_clone), id: i });
 		}));
 	}
